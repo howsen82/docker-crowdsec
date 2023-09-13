@@ -1,0 +1,68 @@
+version: '3.9'
+
+services:
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    environment:
+      GID: "${GID-1000}"
+      COLLECTIONS: "crowdsecurity/linux crowdsecurity/traefik"
+    # depends_on:  #uncomment if running traefik in the same compose file
+    #   - 'traefik'
+    volumes:
+      - ./config/acquis.yaml:/etc/crowdsec/acquis.yaml
+      - crowdsec-db:/var/lib/crowdsec/data/
+      - crowdsec-config:/etc/crowdsec/
+      - traefik_traefik-logs:/var/log/traefik/:ro
+    networks:
+      - proxy
+    restart: unless-stopped
+
+  bouncer-traefik:
+    image: docker.io/fbonalair/traefik-crowdsec-bouncer:latest
+    container_name: bouncer-traefik
+    environment:
+      CROWDSEC_BOUNCER_API_KEY: some-api-key
+      CROWDSEC_AGENT_HOST: crowdsec:8080
+    networks:
+      - proxy # same network as traefik + crowdsec
+    depends_on:
+      - crowdsec
+    restart: unless-stopped
+
+  dashboard:
+    #we're using a custom Dockerfile so that metabase pops with pre-configured dashboards
+    build: ./dashboard
+    restart: always
+    ports:
+      - 3000:3000
+    environment:
+      MB_DB_FILE: /data/metabase.db
+      MGID: "${GID-1000}"
+    depends_on:
+      - 'crowdsec'
+    volumes:
+      - crowdsec-db:/metabase-data/
+    networks:
+      crowdsec_test:
+        ipv4_address: 172.20.0.5
+
+networks:
+  proxy:
+    external: true
+
+volumes:
+  crowdsec-db:
+  crowdsec-config:
+  traefik_traefik-logs: # this will be the name of the volume from trarfic logs
+    external: true # remove if traefik is running on same stack
+  
+# docker network create proxy
+# docker volume create --name=traefik_traefik-logs
+# docker-compose up -d --force-recreate
+
+# docker exec crowdsec cscli metrics
+# docker exec crowdsec cscli decisions list
+# docker exec crowdsec cscli collections install crowdsecurity/traefik
+# docker exec crowdsec cscli hub update
+# docker exec crowdsec cscli hub upgrade
